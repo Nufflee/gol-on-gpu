@@ -122,6 +122,8 @@ __global__ void game_of_life_kernel(uint8_t* input, uint8_t* output, uint32_t bo
 	} else {
 		if (neighbors == 3) {
 			output[y * boardWidth + x] = Cell::ALIVE;
+		} else {
+			output[y * boardWidth + x] = Cell::DEAD;
 		}
 	}
 #endif

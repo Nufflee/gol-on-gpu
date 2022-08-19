@@ -54,6 +54,8 @@ Board& CPU_GameOfLife::step() {
 			} else {
 				if (neighbors == 3) {
 					m_NextBoard.set_cell(x, y, Cell::ALIVE);
+				} else {
+					m_NextBoard.set_cell(x, y, Cell::DEAD);
 				}
 			}
 		}

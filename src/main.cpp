@@ -72,6 +72,13 @@ int main(int argc, char* argv[]) {
 	gol.current_board().set_cell(WIDTH / CELL_SIZE / 2 - 1 + offsetX, HEIGHT / CELL_SIZE / 2 + offsetY, Cell::ALIVE);
 	gol.current_board().set_cell(WIDTH / CELL_SIZE / 2 - 0 + offsetX, HEIGHT / CELL_SIZE / 2 + offsetY, Cell::ALIVE);
 
+	// Glider
+	gol.current_board().set_cell(0, 1, Cell::ALIVE);
+	gol.current_board().set_cell(1, 2, Cell::ALIVE);
+	gol.current_board().set_cell(2, 0, Cell::ALIVE);
+	gol.current_board().set_cell(2, 1, Cell::ALIVE);
+	gol.current_board().set_cell(2, 2, Cell::ALIVE);
+
 	printf("Width: %d, Height: %d\n", gol.current_board().width(), gol.current_board().height());
 
 	bool running = true;
