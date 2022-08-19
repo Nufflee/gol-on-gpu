@@ -1,11 +1,12 @@
 #include "game_of_life.hpp"
 #include "gpu_game_of_life.hpp"
 #include "time.hpp"
+#include <cuda.h>
 #include <SDL2/SDL.h>
 
 void benchmark() {
  	constexpr int size = 1 << 13;
-	constexpr int n = 20;
+	constexpr int n = 100;
 
 	/*
 	CPU_GameOfLife gol(size, size);
@@ -28,7 +29,10 @@ void benchmark() {
 		}
 		auto end = get_time_secs();
 
-		printf("GPU (CUDA): %.2f MCells/sec\n", 1 / ((end - start) / n / (size * size)) / 1e6);
+		printf("GPU (CUDA):\n");
+		printf("\tName: %s\n", get_device_name().c_str());
+		printf("\t%.2f MCells/sec\n", 1 / ((end - start) / n / (size * size)) / 1e6);
+		printf("\t%.2f msec/step\n", (end - start) / n * 1000.);
 	}
 }
 

@@ -1,7 +1,7 @@
 #pragma once
 
+#include <string>
 #include "game_of_life.hpp"
-#include <cuda.h>
 
 class GPU_Board {
 public:
@@ -44,3 +44,5 @@ private:
 	GPU_Board m_CurrentBoard;
 	GPU_Board m_NextBoard;
 };
+
+std::string get_device_name();

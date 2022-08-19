@@ -1,5 +1,7 @@
 #include "gpu_game_of_life.hpp"
 #include <cassert>
+#include <cuda.h>
+#include "time.hpp"
 
 #define CHECK_CUDA_CALL(ret) check_cuda_call_impl(ret, __FILE__, __LINE__)
 #define CHECK_LAST_CUDA_CALL() check_cuda_call_impl(cudaGetLastError(), __FILE__, __LINE__)
@@ -14,7 +16,7 @@ void check_cuda_call_impl(const cudaError_t err, const char* fileName, const int
 GPU_Board::GPU_Board(uint32_t width, uint32_t height) {
 	m_Width = width;
 	m_Height = height;
-	// TODO: Can I use pitched ptrs?
+	// TODO: Can I use pitched ptrs? Apparently it makes sure the memory allocated is accessed in the most efficient way possible.
 	CHECK_CUDA_CALL(cudaMallocHost(&m_HostCells, width * height * sizeof(uint8_t)));
 	CHECK_CUDA_CALL(cudaMalloc(&m_DeviceCells, width * height * sizeof(uint8_t)));
 }
@@ -65,7 +67,7 @@ void GPU_Board::set_cell(uint32_t x, uint32_t y, const Cell cell) {
 	m_HostCells[y * m_Width + x] = cell;
 }
 
-#define CUMMY 1
+#define BRANCHLESS true
 
 // TODO: Consolidate input and output boards into one array
 __global__ void game_of_life_kernel(uint8_t* input, uint8_t* output, uint32_t boardWidth, uint32_t boardHeight) {
@@ -108,9 +110,9 @@ __global__ void game_of_life_kernel(uint8_t* input, uint8_t* output, uint32_t bo
 
 	Cell current = (Cell)input[y * boardWidth + x];
 
-#if CUMMY == 0
+#if BRANCHLESS == true
 	output[y * boardWidth + x] = (int)current * (neighbors == 2 || neighbors == 3) + (1 - (int)current) * (neighbors == 3);
-#elif CUMMY == 1
+#else
 	if (current == Cell::ALIVE) {
 		if (neighbors == 2 || neighbors == 3) {
 			output[y * boardWidth + x] = Cell::ALIVE;
@@ -125,6 +127,8 @@ __global__ void game_of_life_kernel(uint8_t* input, uint8_t* output, uint32_t bo
 #endif
 }
 
+#define BANDWIDTH_MEASUREMENT false
+
 GPU_Board& GPU_GameOfLife::step() {
 	constexpr int BLOCK_SIZE = 32;
 	dim3 blockDim(BLOCK_SIZE, BLOCK_SIZE);
@@ -134,18 +138,39 @@ GPU_Board& GPU_GameOfLife::step() {
 
 	dim3 blockCount((int)ceil((float)width / BLOCK_SIZE), (int)ceil((float)height / BLOCK_SIZE));
 
+#if BANDWIDTH_MEASUREMENT == true
+	auto start = get_time_secs();
+#endif
 	CHECK_CUDA_CALL(cudaMemcpy(m_CurrentBoard.device_cells(), m_CurrentBoard.host_cells(), width * height * sizeof(uint8_t), cudaMemcpyHostToDevice));
+#if BANDWIDTH_MEASUREMENT == true
+	auto end = get_time_secs();
+	auto time = end - start;
+	printf("H2D time: %f sec, bandwidth: %f GB/s\n", time, (width * height * sizeof(uint8_t) / 1e9) / time);
+#endif
 
 	game_of_life_kernel<<<blockCount, blockDim>>>((uint8_t*)m_CurrentBoard.device_cells(), (uint8_t*)m_NextBoard.device_cells(), width, height);
 	CHECK_LAST_CUDA_CALL();
 
 	CHECK_CUDA_CALL(cudaDeviceSynchronize());
 
+#if BANDWIDTH_MEASUREMENT == true
+	start = get_time_secs();
+#endif
 	CHECK_CUDA_CALL(cudaMemcpy(m_NextBoard.host_cells(), m_NextBoard.device_cells(), width * height * sizeof(uint8_t), cudaMemcpyDeviceToHost));
-
-	CHECK_CUDA_CALL(cudaDeviceSynchronize());
+#if BANDWIDTH_MEASUREMENT == true
+	end = get_time_secs();
+	time = end - start;
+	printf("D2H time: %f sec, bandwidth: %f GB/s\n", time, (width * height * sizeof(uint8_t) / 1e9) / time);
+#endif
 
 	std::swap(m_CurrentBoard, m_NextBoard);
 
 	return m_CurrentBoard;
+}
+
+std::string get_device_name() {
+	cudaDeviceProp prop;
+	cudaGetDeviceProperties(&prop, 0);
+
+	return std::string(prop.name);
 }
