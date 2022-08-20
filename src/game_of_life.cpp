@@ -1,13 +1,37 @@
 #include "game_of_life.hpp"
 #include <cassert>
 
-Cell Board::get_cell(uint32_t x, uint32_t y) const {
+void Board::randomize(float prob) {
+	for (int i = 0; i < m_Width; i++) {
+		for (int j = 0; j < m_Height; j++) {
+			if ((float)rand() / RAND_MAX < prob) {
+				set_cell(i, j, Cell::ALIVE);
+			}
+		}
+	}
+}
+
+void Board::clear() {
+	for (int i = 0; i < m_Width; i++) {
+		for (int j = 0; j < m_Height; j++) {
+			set_cell(i, j, Cell::DEAD);
+		}
+	}
+}
+
+void CPU_Board::set_cell(uint32_t x, uint32_t y, const Cell cell) {
+	assert(x < m_Width && y < m_Height);
+
+	m_Cells[y * m_Width + x] = cell;
+}
+
+Cell CPU_Board::get_cell(uint32_t x, uint32_t y) const {
 	assert(x < m_Width && y < m_Height);
 
 	return m_Cells[y * m_Width + x];
 }
 
-Cell Board::get_cell_or_dead(uint32_t x, uint32_t y) const {
+Cell CPU_Board::get_cell_or_dead(uint32_t x, uint32_t y) const {
 	if (x >= m_Width || y >= m_Height) {
 		return Cell::DEAD;
 	}
@@ -15,19 +39,7 @@ Cell Board::get_cell_or_dead(uint32_t x, uint32_t y) const {
 	return m_Cells[y * m_Width + x];
 }
 
-void Board::set_cell(uint32_t x, uint32_t y, const Cell cell) {
-	assert(x < m_Width && y < m_Height);
-
-	m_Cells[y * m_Width + x] = cell;
-}
-
-void Board::clear() {
-	for (uint32_t i = 0; i < m_Width * m_Height; i++) {
-		m_Cells[i] = Cell::DEAD;
-	}
-}
-
-Board& CPU_GameOfLife::step() {
+CPU_Board& CPU_GameOfLife::step() {
 	for (int y = 0; y < m_Height; y++) {
 		for (int x = 0; x < m_Width; x++) {
 			// MSVC is too dumb to unroll the loop properly, so we have to do it manually.

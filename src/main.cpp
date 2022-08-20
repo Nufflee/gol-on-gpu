@@ -5,39 +5,54 @@
 #include <SDL2/SDL.h>
 
 void benchmark() {
- 	constexpr int size = 1 << 13;
-	constexpr int n = 100;
-
-	/*
-	CPU_GameOfLife gol(size, size);
-
-	auto start = get_time_secs();
-	for (int i = 0; i < n; i++) {
-		Board& b = gol.step();
-	}
-	auto end = get_time_secs();
-
-	printf("CPU: %.2f MCells/sec\n", 1 / ((end - start) / n / (size * size)) / 1e6);
- 	*/
-
 	{
-		GPU_GameOfLife gol(size, size);
+		constexpr int size = 1 << 13;
+		constexpr int n = 10;
+
+		CPU_GameOfLife gol(size, size);
+
+		gol.current_board().randomize();
 
 		auto start = get_time_secs();
 		for (int i = 0; i < n; i++) {
-			GPU_Board& b = gol.step();
+			Board& b = gol.step();
 		}
 		auto end = get_time_secs();
 
+		printf("CPU:\n");
+		printf("\t%dx%d randomized grid\n", size, size);
+		printf("\t%.2f MCells/sec\n", 1 / ((end - start) / n / (size * size)) / 1e6);
+	}
+
+	{
+		constexpr int size = 1 << 14;
+		constexpr int n = 30;
+
+		GPU_GameOfLife gol(size, size);
+
+		double totalTime = 0;
+
+		gol.current_board().randomize();
+
+		for (int i = 0; i < n; i++) {
+			auto start = get_time_secs();
+			GPU_Board& b = gol.step();
+			auto end = get_time_secs();
+			totalTime += end - start;
+		}
+
 		printf("GPU (CUDA):\n");
 		printf("\tName: %s\n", get_device_name().c_str());
-		printf("\t%.2f MCells/sec\n", 1 / ((end - start) / n / (size * size)) / 1e6);
-		printf("\t%.2f msec/step\n", (end - start) / n * 1000.);
+		printf("\t%dx%d randomized grid\n", size, size);
+		printf("\t%.2f MCells/sec\n", 1 / (totalTime / n / (size * size)) / 1e6);
+		printf("\t%.2f msec/step\n", totalTime / n * 1000.);
 	}
 }
 
 int main(int argc, char* argv[]) {
 	benchmark();
+
+	return 0;
 
 	SDL_Init(SDL_INIT_VIDEO);
 
@@ -78,6 +93,8 @@ int main(int argc, char* argv[]) {
 	gol.current_board().set_cell(2, 0, Cell::ALIVE);
 	gol.current_board().set_cell(2, 1, Cell::ALIVE);
 	gol.current_board().set_cell(2, 2, Cell::ALIVE);
+
+	gol.current_board().randomize();
 
 	printf("Width: %d, Height: %d\n", gol.current_board().width(), gol.current_board().height());
 

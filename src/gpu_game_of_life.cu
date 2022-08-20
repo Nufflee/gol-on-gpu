@@ -13,15 +13,15 @@ void check_cuda_call_impl(const cudaError_t err, const char* fileName, const int
 	}
 }
 
-GPU_Board::GPU_Board(uint32_t width, uint32_t height) {
-	m_Width = width;
-	m_Height = height;
+GPU_Board::GPU_Board(uint32_t width, uint32_t height)
+	: Board(width, height) {
 	// TODO: Can I use pitched ptrs? Apparently it makes sure the memory allocated is accessed in the most efficient way possible.
 	CHECK_CUDA_CALL(cudaMallocHost(&m_HostCells, width * height * sizeof(uint8_t)));
 	CHECK_CUDA_CALL(cudaMalloc(&m_DeviceCells, width * height * sizeof(uint8_t)));
 }
 
-GPU_Board::GPU_Board(GPU_Board&& other) {
+GPU_Board::GPU_Board(GPU_Board&& other)
+	: Board(0, 0) {
 	*this = std::move(other);
 }
 
@@ -47,6 +47,12 @@ GPU_Board& GPU_Board::operator=(GPU_Board&& other) {
 	return *this;
 }
 
+void GPU_Board::set_cell(uint32_t x, uint32_t y, const Cell cell) {
+	assert(x < m_Width && y < m_Height);
+
+	m_HostCells[y * m_Width + x] = cell;
+}
+
 Cell GPU_Board::get_cell(uint32_t x, uint32_t y) const {
 	assert(x < m_Width && y < m_Height);
 
@@ -59,12 +65,6 @@ Cell GPU_Board::get_cell_or_dead(uint32_t x, uint32_t y) const {
 	}
 
 	return Cell::DEAD;
-}
-
-void GPU_Board::set_cell(uint32_t x, uint32_t y, const Cell cell) {
-	assert(x < m_Width && y < m_Height);
-
-	m_HostCells[y * m_Width + x] = cell;
 }
 
 #define BRANCHLESS true
