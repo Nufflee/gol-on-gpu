@@ -2,6 +2,7 @@
 
 #include <string>
 #include "game_of_life.hpp"
+#include <cuda_runtime.h>
 
 class GPU_Board : public Board {
 public:
@@ -20,14 +21,17 @@ public:
 	// @returns The cell at the given position (x, y), or a dead cell if the position is outside the board.
 	Cell get_cell_or_dead(uint32_t x, uint32_t y) const override;
 
+	void copy_host_to_device();
+	void copy_device_to_host();
+
 	inline uint32_t width() const { return m_Width; }
 	inline uint32_t height() const { return m_Height; }
 	inline Cell* host_cells() const { return m_HostCells; }
-	inline Cell* device_cells() const { return m_DeviceCells; }
+	struct cudaPitchedPtr device_cells() { return m_DeviceCells; }
 
 private:
 	Cell* m_HostCells = nullptr;
-	Cell* m_DeviceCells = nullptr;
+	cudaPitchedPtr m_DeviceCells {};
 };
 
 class GPU_GameOfLife {
