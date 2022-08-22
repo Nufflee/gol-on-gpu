@@ -24,20 +24,22 @@ public:
 	void copy_host_to_device();
 	void copy_device_to_host();
 
+	void shift_out_generation();
+
 	inline uint32_t width() const { return m_Width; }
 	inline uint32_t height() const { return m_Height; }
-	inline Cell* host_cells() const { return m_HostCells; }
+	inline uint8_t* host_cells() const { return m_HostCells; }
 	struct cudaPitchedPtr device_cells() { return m_DeviceCells; }
 
 private:
-	Cell* m_HostCells = nullptr;
+	uint8_t* m_HostCells = nullptr;
 	cudaPitchedPtr m_DeviceCells {};
 };
 
 class GPU_GameOfLife {
 public:
 	GPU_GameOfLife(uint32_t width, uint32_t height)
-		: m_CurrentBoard(width, height), m_NextBoard(width, height) {
+		: m_CurrentBoard(width, height) {
 	}
 
 	GPU_Board& step();
@@ -46,7 +48,6 @@ public:
 
 private:
 	GPU_Board m_CurrentBoard;
-	GPU_Board m_NextBoard;
 };
 
 std::string get_device_name();

@@ -25,8 +25,8 @@ void benchmark() {
 	}
 
 	{
-		constexpr int size = 1 << 14;
-		constexpr int n = 30;
+		constexpr int size = 1 << 13;
+		constexpr int n = 50;
 
 		GPU_GameOfLife gol(size, size);
 
@@ -44,15 +44,14 @@ void benchmark() {
 		printf("GPU (CUDA):\n");
 		printf("\tName: %s\n", get_device_name().c_str());
 		printf("\t%dx%d randomized grid\n", size, size);
-		printf("\t%.2f MCells/sec\n", 1 / (totalTime / n / (size * size)) / 1e6);
-		printf("\t%.2f msec/step\n", totalTime / n * 1000.);
+		printf("\t%.2f MCells/sec\n", 1 / (totalTime / n / (size * size)) / 1e6 * 8);
+		printf("\t%.2f msec/step\n", totalTime / n * 1000.0);
 	}
 }
 
+// TODO: Add command line setting for pixels/cell.
 int main(int argc, char* argv[]) {
 	benchmark();
-
-	return 0;
 
 	SDL_Init(SDL_INIT_VIDEO);
 

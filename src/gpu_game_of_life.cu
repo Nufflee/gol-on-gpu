@@ -49,18 +49,20 @@ GPU_Board& GPU_Board::operator=(GPU_Board&& other) {
 void GPU_Board::set_cell(uint32_t x, uint32_t y, const Cell cell) {
 	assert(x < m_Width && y < m_Height);
 
-	m_HostCells[y * m_Width + x] = cell;
+	uint8_t* current = &m_HostCells[y * m_Width + x];
+
+	*current = (*current & ~1) | cell;
 }
 
 Cell GPU_Board::get_cell(uint32_t x, uint32_t y) const {
 	assert(x < m_Width && y < m_Height);
 
-	return m_HostCells[y * m_Width + x];
+	return (Cell)(m_HostCells[y * m_Width + x] & 1);
 }
 
 Cell GPU_Board::get_cell_or_dead(uint32_t x, uint32_t y) const {
 	if (x < m_Width && y < m_Height) {
-		return m_HostCells[y * m_Width + x];
+		return (Cell)(m_HostCells[y * m_Width + x] & 1);
 	}
 
 	return Cell::DEAD;
@@ -74,71 +76,79 @@ void GPU_Board::copy_device_to_host() {
 	CHECK_CUDA_CALL(cudaMemcpy2D(m_HostCells, m_Width * sizeof(uint8_t), m_DeviceCells.ptr, m_DeviceCells.pitch, m_Width * sizeof(uint8_t), m_Height, cudaMemcpyDeviceToHost));
 }
 
-#define BRANCHLESS true
-
-__device__ Cell get_cell(const cudaPitchedPtr board, uint32_t x, uint32_t y) {
-	return (Cell)(((uint8_t*)board.ptr)[y * board.pitch + x]);
+void GPU_Board::shift_out_generation() {
+	for (int i = 0; i < m_Width * m_Height; i++) {
+		m_HostCells[i] >>= 1;
+	}
 }
 
-__device__ void set_cell(const cudaPitchedPtr board, uint32_t x, uint32_t y, const Cell cell) {
-	((uint8_t*)board.ptr)[y * board.pitch + x] = cell;
+#define BRANCHLESS true
+
+__device__ Cell get_cell(const cudaPitchedPtr board, uint32_t x, uint32_t y, int generation) {
+	return (Cell)(((uint8_t*)board.ptr)[y * board.pitch + x] & (1 << generation));
+}
+
+__device__ void set_cell(const cudaPitchedPtr board, uint32_t x, uint32_t y, const Cell cell, int generation) {
+	uint8_t* current = &((uint8_t*)board.ptr)[y * board.pitch + x];
+
+	*current = (*current | (1 << generation)) & (cell << generation);
 }
 
 // TODO: Consolidate input and output boards into one array
-__global__ void game_of_life_kernel(cudaPitchedPtr input, cudaPitchedPtr output, uint32_t boardWidth, uint32_t boardHeight) {
+__global__ void game_of_life_kernel(cudaPitchedPtr generations, uint32_t boardWidth, uint32_t boardHeight, int generation) {
 	uint32_t x = blockIdx.x * blockDim.x + threadIdx.x;
 	uint32_t y = blockIdx.y * blockDim.y + threadIdx.y;
 
 	int neighbors = 0;
 
 	if (y > 0) {
-		neighbors += get_cell(input, x, y - 1);
+		neighbors += get_cell(generations, x, y - 1, generation - 1);
 
 		if (x > 0) {
-			neighbors += get_cell(input, x - 1, y - 1);
+			neighbors += get_cell(generations, x - 1, y - 1, generation - 1);
 		}
 
 		if (x < boardWidth - 1) {
-			neighbors += get_cell(input, x + 1, y - 1);
+			neighbors += get_cell(generations, x + 1, y - 1, generation - 1);
 		}
 	}
 
 	if (x > 0) {
-		neighbors += get_cell(input, x - 1,  y);
+		neighbors += get_cell(generations, x - 1,  y, generation - 1);
 	}
 
 	if (x < boardWidth - 1) {
-		neighbors += get_cell(input, x + 1, y);
+		neighbors += get_cell(generations, x + 1, y, generation - 1);
 	}
 
 	if (y < boardHeight - 1) {
-		neighbors += get_cell(input, x, y + 1);
+		neighbors += get_cell(generations, x, y + 1, generation - 1);
 
 		if (x > 0) {
-			neighbors += get_cell(input, x - 1, y + 1);
+			neighbors += get_cell(generations, x - 1, y + 1, generation - 1);
 		}
 
 		if (x < boardWidth - 1) {
-			neighbors += get_cell(input, x + 1, y + 1);
+			neighbors += get_cell(generations, x + 1, y + 1, generation - 1);
 		}
 	}
 
-	Cell current = get_cell(input, x, y);
+	Cell current = get_cell(generations, x, y, generation - 1);
 
 #if BRANCHLESS == true
-	set_cell(output, x, y, (int)current * (neighbors == 2 || neighbors == 3) + (1 - (int)current) * (neighbors == 3));
+	set_cell(generations, x, y, (Cell)((int)current * (neighbors == 2 || neighbors == 3) + (1 - (int)current) * (neighbors == 3)), generation);
 #else
 	if (current == Cell::ALIVE) {
 		if (neighbors == 2 || neighbors == 3) {
-			set_cell(output, x, y, Cell::ALIVE);
+			set_cell(generations, x, y, Cell::ALIVE, generation);
 		} else {
-			set_cell(output, x, y, Cell::DEAD);
+			set_cell(generations, x, y, Cell::DEAD, generation);
 		}
 	} else {
 		if (neighbors == 3) {
-			set_cell(output, x, y, Cell::ALIVE);
+			set_cell(generations, x, y, Cell::ALIVE, generation);
 		} else {
-			set_cell(output, x, y, Cell::DEAD);
+			set_cell(generations, x, y, Cell::DEAD, generation);
 		}
 	}
 #endif
@@ -146,7 +156,10 @@ __global__ void game_of_life_kernel(cudaPitchedPtr input, cudaPitchedPtr output,
 
 #define BANDWIDTH_MEASUREMENT false
 
+// TODO: Make use of all 7 new generations
+// TODO: Run the kernel asynchronously and put generations in some sort of a queue
 GPU_Board& GPU_GameOfLife::step() {
+	// TODO: Check the maximum number of blocks for current GPU
 	constexpr int BLOCK_SIZE = 32;
 	dim3 blockDim(BLOCK_SIZE, BLOCK_SIZE);
 
@@ -165,22 +178,24 @@ GPU_Board& GPU_GameOfLife::step() {
 	printf("H2D time: %f sec, bandwidth: %f GB/s\n", time, (width * height * sizeof(uint8_t) / 1e9) / time);
 #endif
 
-	game_of_life_kernel<<<blockCount, blockDim>>>(m_CurrentBoard.device_cells(), m_NextBoard.device_cells(), width, height);
-	CHECK_LAST_CUDA_CALL();
+	for (int i = 1; i < 8; i++) {
+		game_of_life_kernel<<<blockCount, blockDim>>>(m_CurrentBoard.device_cells(), width, height, i);
+		CHECK_LAST_CUDA_CALL();
+	}
 
 	CHECK_CUDA_CALL(cudaDeviceSynchronize());
 
 #if BANDWIDTH_MEASUREMENT == true
 	start = get_time_secs();
 #endif
-	m_NextBoard.copy_device_to_host();
+	m_CurrentBoard.copy_device_to_host();
 #if BANDWIDTH_MEASUREMENT == true
 	end = get_time_secs();
 	time = end - start;
 	printf("D2H time: %f sec, bandwidth: %f GB/s\n", time, (width * height * sizeof(uint8_t) / 1e9) / time);
 #endif
 
-	std::swap(m_CurrentBoard, m_NextBoard);
+	m_CurrentBoard.shift_out_generation();
 
 	return m_CurrentBoard;
 }
