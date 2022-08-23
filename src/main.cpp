@@ -26,7 +26,7 @@ void benchmark() {
 
 	{
 		constexpr int size = 1 << 13;
-		constexpr int n = 50;
+		constexpr int n = 100;
 
 		GPU_GameOfLife gol(size, size);
 
@@ -36,9 +36,13 @@ void benchmark() {
 
 		for (int i = 0; i < n; i++) {
 			auto start = get_time_secs();
+
 			GPU_Board& b = gol.step();
+
 			auto end = get_time_secs();
 			totalTime += end - start;
+
+			b.reset_generation();
 		}
 
 		printf("GPU (CUDA):\n");
@@ -57,7 +61,7 @@ int main(int argc, char* argv[]) {
 
 	constexpr int WIDTH = 1920;
 	constexpr int HEIGHT = 1080;
-	constexpr int CELL_SIZE = 20;
+	constexpr int CELL_SIZE = 5;
 
 	SDL_Window* window = SDL_CreateWindow("Game of Life", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, WIDTH, HEIGHT, SDL_WINDOW_SHOWN);
 
@@ -137,7 +141,7 @@ int main(int argc, char* argv[]) {
 		gol.step();
 
 		SDL_RenderPresent(renderer);
-		SDL_Delay(250);
+		SDL_Delay(100);
 	}
 
 	SDL_DestroyRenderer(renderer);

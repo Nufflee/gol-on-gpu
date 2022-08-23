@@ -24,7 +24,8 @@ public:
 	void copy_host_to_device();
 	void copy_device_to_host();
 
-	void shift_out_generation();
+	bool shift_out_generation();
+	void reset_generation();
 
 	inline uint32_t width() const { return m_Width; }
 	inline uint32_t height() const { return m_Height; }
@@ -34,6 +35,7 @@ public:
 private:
 	uint8_t* m_HostCells = nullptr;
 	cudaPitchedPtr m_DeviceCells {};
+	int m_CurrentGeneration = -1;
 };
 
 class GPU_GameOfLife {

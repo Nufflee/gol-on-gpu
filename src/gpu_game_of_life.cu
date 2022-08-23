@@ -1,5 +1,6 @@
 #include "gpu_game_of_life.hpp"
 #include <cassert>
+#include <immintrin.h>
 #include "time.hpp"
 
 #define CHECK_CUDA_CALL(ret) check_cuda_call_impl(ret, __FILE__, __LINE__)
@@ -74,27 +75,55 @@ void GPU_Board::copy_host_to_device() {
 
 void GPU_Board::copy_device_to_host() {
 	CHECK_CUDA_CALL(cudaMemcpy2D(m_HostCells, m_Width * sizeof(uint8_t), m_DeviceCells.ptr, m_DeviceCells.pitch, m_Width * sizeof(uint8_t), m_Height, cudaMemcpyDeviceToHost));
+	m_CurrentGeneration = 0;
 }
 
-void GPU_Board::shift_out_generation() {
-	for (int i = 0; i < m_Width * m_Height; i++) {
+bool GPU_Board::shift_out_generation() {
+	if (m_CurrentGeneration == 7 || m_CurrentGeneration == -1) {
+		return false;
+	}
+
+	// TODO: Use cpuid intrinsic to check if AVX2 is supported, at runtime. https://docs.microsoft.com/en-us/cpp/intrinsics/cpuid-cpuidex?view=msvc-170
+	for (uint32_t i = 0; i < m_Width * m_Height / 32; i++) {
+		__m256i simdData8 = _mm256_loadu_epi8(&m_HostCells[i * 32]);
+
+		__m256i simdData16lo = _mm256_unpacklo_epi8(simdData8, _mm256_setzero_si256());
+		simdData16lo = _mm256_srli_epi16(simdData16lo, 1);
+
+		__m256i simData16hi = _mm256_unpackhi_epi8(simdData8, _mm256_setzero_si256());
+		simData16hi = _mm256_srli_epi16(simData16hi, 1);
+
+		__m256i result = _mm256_packus_epi16(simdData16lo, simData16hi);
+
+		_mm256_storeu_epi8(&m_HostCells[i * 32], result);
+	}
+
+	for(int i = 0; i < m_Width * m_Height % 32; i++) {
 		m_HostCells[i] >>= 1;
 	}
+
+	m_CurrentGeneration += 1;
+
+	return true;
 }
 
-#define BRANCHLESS true
+void GPU_Board::reset_generation() {
+	m_CurrentGeneration = -1;
+}
 
 __device__ Cell get_cell(const cudaPitchedPtr board, uint32_t x, uint32_t y, int generation) {
-	return (Cell)(((uint8_t*)board.ptr)[y * board.pitch + x] & (1 << generation));
+	return (Cell)(((uint8_t*)board.ptr)[y * board.pitch + x] >> generation & 1);
 }
 
 __device__ void set_cell(const cudaPitchedPtr board, uint32_t x, uint32_t y, const Cell cell, int generation) {
 	uint8_t* current = &((uint8_t*)board.ptr)[y * board.pitch + x];
 
-	*current = (*current | (1 << generation)) & (cell << generation);
+	*current = (*current & ~(1 << generation)) | (cell << generation);
 }
 
-// TODO: Consolidate input and output boards into one array
+#define BRANCHLESS true
+
+// TODO: Try to coalesce memory accesses
 __global__ void game_of_life_kernel(cudaPitchedPtr generations, uint32_t boardWidth, uint32_t boardHeight, int generation) {
 	uint32_t x = blockIdx.x * blockDim.x + threadIdx.x;
 	uint32_t y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -159,45 +188,49 @@ __global__ void game_of_life_kernel(cudaPitchedPtr generations, uint32_t boardWi
 // TODO: Make use of all 7 new generations
 // TODO: Run the kernel asynchronously and put generations in some sort of a queue
 GPU_Board& GPU_GameOfLife::step() {
-	// TODO: Check the maximum number of blocks for current GPU
-	constexpr int BLOCK_SIZE = 32;
-	dim3 blockDim(BLOCK_SIZE, BLOCK_SIZE);
+	if (m_CurrentBoard.shift_out_generation()) {
+		return m_CurrentBoard;
+	} else {
+		// TODO: Check the maximum/best number of blocks for current GPU
+		constexpr int BLOCK_SIZE = 32;
+		dim3 blockDim(BLOCK_SIZE, BLOCK_SIZE);
 
-	uint32_t width = m_CurrentBoard.width();
-	uint32_t height = m_CurrentBoard.height();
+		uint32_t width = m_CurrentBoard.width();
+		uint32_t height = m_CurrentBoard.height();
 
-	dim3 blockCount((int)ceil((float)width / BLOCK_SIZE), (int)ceil((float)height / BLOCK_SIZE));
+		dim3 blockCount((int)ceil((float)width / BLOCK_SIZE), (int)ceil((float)height / BLOCK_SIZE));
 
 #if BANDWIDTH_MEASUREMENT == true
-	auto start = get_time_secs();
+		auto start = get_time_secs();
 #endif
-	m_CurrentBoard.copy_host_to_device();
+		m_CurrentBoard.copy_host_to_device();
 #if BANDWIDTH_MEASUREMENT == true
-	auto end = get_time_secs();
-	auto time = end - start;
-	printf("H2D time: %f sec, bandwidth: %f GB/s\n", time, (width * height * sizeof(uint8_t) / 1e9) / time);
+		auto end = get_time_secs();
+		auto time = end - start;
+		printf("H2D time: %f sec, bandwidth: %f GB/s\n", time, (width * height * sizeof(uint8_t) / 1e9) / time);
 #endif
 
-	for (int i = 1; i < 8; i++) {
-		game_of_life_kernel<<<blockCount, blockDim>>>(m_CurrentBoard.device_cells(), width, height, i);
-		CHECK_LAST_CUDA_CALL();
+		for (int i = 1; i < 8; i++) {
+			game_of_life_kernel<<<blockCount, blockDim>>>(m_CurrentBoard.device_cells(), width, height, i);
+			CHECK_LAST_CUDA_CALL();
+		}
+
+		CHECK_CUDA_CALL(cudaDeviceSynchronize());
+
+#if BANDWIDTH_MEASUREMENT == true
+		start = get_time_secs();
+#endif
+		m_CurrentBoard.copy_device_to_host();
+#if BANDWIDTH_MEASUREMENT == true
+		end = get_time_secs();
+		time = end - start;
+		printf("D2H time: %f sec, bandwidth: %f GB/s\n", time, (width * height * sizeof(uint8_t) / 1e9) / time);
+#endif
+
+		m_CurrentBoard.shift_out_generation();
+
+		return m_CurrentBoard;
 	}
-
-	CHECK_CUDA_CALL(cudaDeviceSynchronize());
-
-#if BANDWIDTH_MEASUREMENT == true
-	start = get_time_secs();
-#endif
-	m_CurrentBoard.copy_device_to_host();
-#if BANDWIDTH_MEASUREMENT == true
-	end = get_time_secs();
-	time = end - start;
-	printf("D2H time: %f sec, bandwidth: %f GB/s\n", time, (width * height * sizeof(uint8_t) / 1e9) / time);
-#endif
-
-	m_CurrentBoard.shift_out_generation();
-
-	return m_CurrentBoard;
 }
 
 std::string get_device_name() {
