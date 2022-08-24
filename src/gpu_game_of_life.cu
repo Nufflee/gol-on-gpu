@@ -83,19 +83,20 @@ bool GPU_Board::shift_out_generation() {
 		return false;
 	}
 
+	__m256i mask = _mm256_set1_epi8(255 >> 1);
+
 	// TODO: Use cpuid intrinsic to check if AVX2 is supported, at runtime. https://docs.microsoft.com/en-us/cpp/intrinsics/cpuid-cpuidex?view=msvc-170
 	for (uint32_t i = 0; i < m_Width * m_Height / 32; i++) {
-		__m256i simdData8 = _mm256_loadu_epi8(&m_HostCells[i * 32]);
+		// NOTE: MSVC fails to autovectorize this loop so I had to vectorize it manually. Inspired by GCC's vectorization.
+		__m256i simdData8 = _mm256_loadu_si256((__m256i*)&m_HostCells[i * 32]);
 
-		__m256i simdData16lo = _mm256_unpacklo_epi8(simdData8, _mm256_setzero_si256());
-		simdData16lo = _mm256_srli_epi16(simdData16lo, 1);
+		// Right shifting a 16-bit value by 1 bit (which is also generalizable to any arbitrary shift n) and then masking
+		// out the lower 7 bits of each individual 8-bit value is equivalent to right shifting the individual 8-bit values by 1 bit.
+		// This identity is being taken advantage of here as AVX2 only supports 16-bit right shifts.
+		__m256i result = _mm256_srli_epi16(simdData8, 1);
+		result = _mm256_and_si256(result, mask);
 
-		__m256i simData16hi = _mm256_unpackhi_epi8(simdData8, _mm256_setzero_si256());
-		simData16hi = _mm256_srli_epi16(simData16hi, 1);
-
-		__m256i result = _mm256_packus_epi16(simdData16lo, simData16hi);
-
-		_mm256_storeu_epi8(&m_HostCells[i * 32], result);
+		_mm256_storeu_si256((__m256i*)&m_HostCells[i * 32], result);
 	}
 
 	for(int i = 0; i < m_Width * m_Height % 32; i++) {

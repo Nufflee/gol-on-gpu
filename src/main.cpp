@@ -1,7 +1,6 @@
 #include "game_of_life.hpp"
 #include "gpu_game_of_life.hpp"
 #include "time.hpp"
-#include <cuda.h>
 #include <SDL2/SDL.h>
 
 void benchmark() {
@@ -118,7 +117,7 @@ int main(int argc, char* argv[]) {
 		SDL_SetRenderDrawColor(renderer, 100, 100, 100, 255);
 		SDL_RenderClear(renderer);
 
-		// Lines
+		// Grid
 		SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
 		for (int x = 0; x < WIDTH; x += CELL_SIZE) {
 			SDL_RenderDrawLine(renderer, x, 0, x, HEIGHT);
