@@ -4,6 +4,8 @@
 #include <SDL2/SDL.h>
 
 void benchmark() {
+	printf("Timer resolution: %.2f ns\n", get_timer_resolution() * 1e9);
+
 	{
 		constexpr int size = 1 << 13;
 		constexpr int n = 10;
